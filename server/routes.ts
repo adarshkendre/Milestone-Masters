@@ -4,6 +4,7 @@ import { setupAuth } from "./auth";
 import { storage } from "./storage";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
+// Initialize Gemini with the correct API version
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -30,82 +31,74 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log("Goal created successfully:", createdGoal);
 
-      // Generate schedule using Gemini with better error handling
-      const model = genAI.getGenerativeModel({ model: "gemini-pro" });
-
-      // Create more structured prompt with format instructions
-      const prompt = `
-        Create a day-by-day schedule between ${req.body.startDate} and ${req.body.endDate} for this goal: ${req.body.title}. 
-        ${req.body.description || ""}
-
-        Please follow these guidelines:
-        1. Break down the goal into logical steps that can be completed daily
-        2. Consider the time frame and create a reasonable progression
-        3. Format each line EXACTLY as: "YYYY-MM-DD: [task description]"
-        4. Make sure each date falls within the provided range
-        5. Tasks should be specific and actionable
-
-        Example format:
-        2025-02-26: Set up development environment and install Python
-        2025-02-27: Complete Python syntax basics tutorial
-      `;
-
-      console.log("Sending prompt to Gemini API:", prompt);
-
       try {
+        // Generate schedule using Gemini
+        const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+
+        const prompt = `
+          Create a schedule for learning ${req.body.title} between ${req.body.startDate} and ${req.body.endDate}.
+          ${req.body.description ? `Additional context: ${req.body.description}` : ''}
+
+          Break down the learning into daily tasks.
+          Format each task as:
+          YYYY-MM-DD: [task description]
+
+          Example:
+          2025-02-26: Set up Python development environment
+          2025-02-27: Complete basic Python syntax tutorial
+        `;
+
+        console.log("Sending prompt to Gemini:", prompt);
+
         const result = await model.generateContent(prompt);
         const response = await result.response;
         const text = response.text();
 
-        console.log("Raw Gemini API response:", text);
+        console.log("Gemini response:", text);
 
-        // More robust parsing with error handling
-        const schedule = text.split("\n")
-          .filter(line => line.trim() && line.includes(":"))
+        const tasks = text
+          .split('\n')
+          .map(line => line.trim())
+          .filter(line => line && line.includes(':'))
           .map(line => {
-            // Find the first colon to split date and task
-            const colonIndex = line.indexOf(":");
-            if (colonIndex === -1) return null;
-
-            const date = line.substring(0, colonIndex).trim();
-            const task = line.substring(colonIndex + 1).trim();
-
-            // Validate date format (YYYY-MM-DD)
-            const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-            if (!dateRegex.test(date)) return null;
-
-            return { date, task };
+            const [date, ...taskParts] = line.split(':');
+            return {
+              date: date.trim(),
+              task: taskParts.join(':').trim()
+            };
           })
-          .filter(item => item !== null);
+          .filter(task => {
+            const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+            return dateRegex.test(task.date);
+          });
 
-        console.log("Parsed schedule:", schedule);
-
-        // Check if we got any valid schedule items
-        if (schedule.length === 0) {
-          throw new Error("Failed to generate a valid schedule from AI response");
+        if (tasks.length === 0) {
+          throw new Error('No valid tasks generated');
         }
 
-        // Create tasks from schedule
-        const tasks = [];
-        for (const item of schedule) {
-          const task = await storage.createTask({
+        console.log("Parsed tasks:", tasks);
+
+        // Create tasks
+        const createdTasks = [];
+        for (const task of tasks) {
+          const newTask = await storage.createTask({
             goalId: createdGoal.id,
-            date: item.date,
-            task: item.task,
+            date: task.date,
+            task: task.task,
             isCompleted: false,
             completionNotes: null,
           });
-          tasks.push(task);
+          createdTasks.push(newTask);
         }
 
-        console.log("Created tasks:", tasks);
+        res.json({ 
+          goal: createdGoal, 
+          tasks: createdTasks 
+        });
 
-        // Return goal with tasks
-        res.json({ goal: createdGoal, tasks });
-
-      } catch (genError) {
-        console.error("Gemini API or task creation error:", genError);
-        res.status(500).json({ 
+      } catch (aiError) {
+        console.error("AI Schedule generation error:", aiError);
+        res.status(500).json({
           message: "Failed to generate schedule, but goal was created. Please try adding tasks manually.",
           goal: createdGoal
         });
@@ -113,13 +106,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     } catch (error) {
       console.error("Goal creation error:", error);
-      res.status(500).json({ 
-        message: "Failed to create goal. Please try again later."
+      res.status(500).json({
+        message: "Failed to create goal"
       });
     }
   });
 
-  // Add chat endpoint for Clear Concept Bot
+  // Chat endpoint for Clear Concept Bot
   app.post("/api/chat", async (req, res) => {
     if (!req.user) return res.sendStatus(401);
 
@@ -128,14 +121,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Message is required" });
       }
 
+      console.log("Chat request:", req.body.message);
+
       const model = genAI.getGenerativeModel({ model: "gemini-pro" });
-      const prompt = `As a learning assistant for a goal tracking app, help the user with this question: ${req.body.message}`;
+      const prompt = `
+        As a learning assistant focused on goal tracking and learning, help the user with this question: 
+        ${req.body.message}
+
+        Provide a clear, helpful response that encourages learning and progress tracking.
+      `;
 
       const result = await model.generateContent(prompt);
       const response = await result.response;
-      res.json({ response: response.text() });
+      const text = response.text();
+
+      console.log("Chat response:", text);
+
+      res.json({ response: text });
     } catch (error) {
-      console.error("Gemini API error:", error);
+      console.error("Chat error:", error);
       res.status(500).json({ 
         message: "Failed to process your question. Please try again later."
       });
