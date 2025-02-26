@@ -12,6 +12,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/goals", async (req, res) => {
     if (!req.user) return res.sendStatus(401);
 
+    let createdGoal;
+
     try {
       // Validate input data
       if (!req.body.title || !req.body.startDate || !req.body.endDate) {
@@ -19,7 +21,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Create goal first
-      const goal = await storage.createGoal({
+      createdGoal = await storage.createGoal({
         ...req.body,
         userId: req.user.id,
       });
@@ -75,7 +77,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Create tasks from schedule
       for (const item of schedule) {
         await storage.createTask({
-          goalId: goal.id,
+          goalId: createdGoal.id,
           date: item.date,
           task: item.task,
           isCompleted: false,
@@ -84,8 +86,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Return goal with tasks
-      const tasks = await storage.getTasksByGoal(goal.id);
-      res.json({ goal, tasks });
+      const tasks = await storage.getTasksByGoal(createdGoal.id);
+      res.json({ goal: createdGoal, tasks });
 
     } catch (error) {
       console.error("Goal creation or schedule generation error:", error);
@@ -93,7 +95,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Return the goal even if schedule generation fails
       res.status(500).json({ 
         message: "Failed to generate schedule, but goal was created. Please try adding tasks manually.",
-        goal
+        goal: createdGoal
       });
     }
   });

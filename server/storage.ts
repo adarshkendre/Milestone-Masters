@@ -15,6 +15,7 @@ export interface IStorage {
   getGoal(id: number): Promise<Goal | undefined>;
 
   createTask(task: InsertTask): Promise<Task>;
+  getTask(id: number): Promise<Task | undefined>;
   getTasksByGoal(goalId: number): Promise<Task[]>;
   updateTask(id: number, updates: Partial<Task>): Promise<Task>;
 
@@ -101,6 +102,10 @@ export class MemStorage implements IStorage {
     };
     this.tasks.set(id, newTask);
     return newTask;
+  }
+
+  async getTask(id: number): Promise<Task | undefined> {
+    return this.tasks.get(id);
   }
 
   async getTasksByGoal(goalId: number): Promise<Task[]> {
