@@ -64,6 +64,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json(tasks);
   });
 
+  // Add chat endpoint for Clear Concept Bot
+  app.post("/api/chat", async (req, res) => {
+    if (!req.user) return res.sendStatus(401);
+
+    try {
+      const model = genAI.getGenerativeModel({ model: "gemini-1.0-pro" });
+      const prompt = `As a learning assistant for a goal tracking app, help the user with this question: ${req.body.message}`;
+
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      res.json({ response: response.text() });
+    } catch (error) {
+      console.error("Gemini API error:", error);
+      res.status(500).json({ 
+        message: "Failed to process your question. Please try again later."
+      });
+    }
+  });
+
   app.post("/api/tasks/:id/validate", async (req, res) => {
     if (!req.user) return res.sendStatus(401);
 

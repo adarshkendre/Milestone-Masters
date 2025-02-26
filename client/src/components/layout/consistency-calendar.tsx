@@ -3,6 +3,8 @@ import { Calendar } from "@/components/ui/calendar";
 import { useAuth } from "@/hooks/use-auth";
 import { useQuery } from "@tanstack/react-query";
 import { Task } from "@shared/schema";
+import { cn } from "@/lib/utils";
+import { format, isSameDay } from "date-fns";
 
 export function ConsistencyCalendar() {
   const { user } = useAuth();
@@ -10,8 +12,13 @@ export function ConsistencyCalendar() {
     queryKey: ["/api/goals", "all-tasks"],
   });
 
+  const today = new Date();
   const completedDates = tasks
     .filter((task) => task.isCompleted)
+    .map((task) => new Date(task.date));
+
+  const missedDates = tasks
+    .filter((task) => !task.isCompleted && new Date(task.date) < today)
     .map((task) => new Date(task.date));
 
   return (
@@ -24,8 +31,16 @@ export function ConsistencyCalendar() {
           mode="multiple"
           selected={completedDates}
           className="rounded-md border w-full"
+          modifiers={{
+            missed: missedDates,
+            today: [today],
+          }}
+          modifiersClassNames={{
+            missed: "bg-red-500 text-primary-foreground hover:bg-red-500 rounded-full",
+            today: "border-2 border-primary",
+          }}
           classNames={{
-            day_selected: "bg-green-500 text-primary-foreground hover:bg-green-500",
+            day_selected: "bg-green-500 text-primary-foreground hover:bg-green-500 rounded-full",
             cell: "h-9 w-9 text-center p-0 relative [&:has([aria-selected])]:bg-accent first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md",
             day: "h-9 w-9 p-0 font-normal aria-selected:bg-green-500 aria-selected:text-white aria-selected:hover:bg-green-500",
             head_cell: "text-muted-foreground font-normal text-[0.8rem] w-9",

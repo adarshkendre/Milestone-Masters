@@ -4,7 +4,7 @@ import { Task } from "@shared/schema";
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest } from "@/lib/queryClient";
 import { Loader2 } from "lucide-react";
 
 interface ConceptValidationProps {
@@ -23,21 +23,28 @@ export function ConceptValidation({
 
   const mutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest(
-        "POST",
-        `/api/tasks/${task?.id}/validate`,
-        { concept }
-      );
-      return res.json();
+      if (mode === "chat") {
+        const res = await apiRequest("POST", "/api/chat", { message: concept });
+        return res.json();
+      } else {
+        const res = await apiRequest(
+          "POST",
+          `/api/tasks/${task?.id}/validate`,
+          { concept }
+        );
+        return res.json();
+      }
     },
     onSuccess: (data) => {
-      if (data.isValid) {
+      if (mode === "chat") {
+        toast({
+          title: "Bot Response",
+          description: data.response,
+        });
+      } else if (data.isValid) {
         toast({
           title: "Concept Validated",
           description: "Great job! Your understanding has been validated.",
-        });
-        queryClient.invalidateQueries({
-          queryKey: ["/api/goals", task?.goalId, "tasks"],
         });
         onValidated?.();
       } else {
@@ -47,6 +54,14 @@ export function ConceptValidation({
           variant: "destructive",
         });
       }
+      setConcept("");
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
     },
   });
 

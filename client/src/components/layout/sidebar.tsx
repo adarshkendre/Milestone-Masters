@@ -56,10 +56,52 @@ export function Sidebar() {
           </SheetContent>
         </Sheet>
 
-        <Button variant="ghost" className="w-full justify-start">
-          <HelpCircle className="mr-2 h-4 w-4" />
-          Help
-        </Button>
+        <Sheet>
+          <SheetTrigger asChild>
+            <Button variant="ghost" className="w-full justify-start">
+              <HelpCircle className="mr-2 h-4 w-4" />
+              Help
+            </Button>
+          </SheetTrigger>
+          <SheetContent>
+            <SheetHeader>
+              <SheetTitle>How to Use Goal Tracker AI</SheetTitle>
+            </SheetHeader>
+            <div className="mt-4 space-y-4">
+              <section>
+                <h3 className="font-medium mb-2">Creating Goals</h3>
+                <p className="text-muted-foreground">Click the "Add Goal" button to create a new goal. Enter a title, description, and date range. The AI will automatically generate a daily task schedule.</p>
+              </section>
+
+              <section>
+                <h3 className="font-medium mb-2">Tracking Progress</h3>
+                <p className="text-muted-foreground">The calendar shows your progress:
+                  - Current day is highlighted
+                  - Green circles indicate completed tasks
+                  - Red circles show missed tasks
+                </p>
+              </section>
+
+              <section>
+                <h3 className="font-medium mb-2">Clear Concept Bot</h3>
+                <p className="text-muted-foreground">Use the Clear Concept Bot to:
+                  - Get help with your goals
+                  - Validate your learning
+                  - Ask questions about tasks
+                </p>
+              </section>
+
+              <section>
+                <h3 className="font-medium mb-2">Stats</h3>
+                <p className="text-muted-foreground">Track your:
+                  - Current streak
+                  - Active days
+                  - Missing days
+                </p>
+              </section>
+            </div>
+          </SheetContent>
+        </Sheet>
       </div>
 
       <div className="mt-auto">
