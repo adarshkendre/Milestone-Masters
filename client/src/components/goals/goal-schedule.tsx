@@ -1,6 +1,6 @@
 import { Goal, Task } from "@shared/schema";
 import { useQuery } from "@tanstack/react-query";
-import { format } from "date-fns";
+import { format, parseISO } from "date-fns";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -32,7 +32,7 @@ export function GoalSchedule({ goal }: { goal: Goal }) {
           <tbody>
             {tasks.map((task) => (
               <tr key={task.id} className="border-t">
-                <td className="p-4">{format(new Date(task.date), "PPP")}</td>
+                <td className="p-4">{format(typeof task.date === 'string' ? parseISO(task.date) : task.date, "PPP")}</td>
                 <td className="p-4">{task.task}</td>
                 <td className="p-4 text-center">
                   <Checkbox
