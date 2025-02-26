@@ -14,11 +14,6 @@ export default function AuthPage() {
   const { user, loginMutation, registerMutation } = useAuth();
   const [, setLocation] = useLocation();
 
-  if (user) {
-    setLocation("/");
-    return null;
-  }
-
   const loginForm = useForm({
     defaultValues: {
       username: "",
@@ -34,6 +29,12 @@ export default function AuthPage() {
       email: "",
     },
   });
+
+  // Move the redirect check after all hooks are initialized
+  if (user) {
+    setLocation("/");
+    return null;
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-primary/10 to-secondary/10 flex items-center justify-center p-4">
