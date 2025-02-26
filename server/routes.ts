@@ -25,7 +25,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       // Generate schedule using Gemini with better error handling
-      const model = genAI.getGenerativeModel({ model: "gemini-1.0-pro" });
+      const model = genAI.getGenerativeModel({ model: "gemini-pro" });
 
       // Create more structured prompt with format instructions
       const prompt = `
@@ -90,44 +90,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Goal creation or schedule generation error:", error);
 
-      // Check if goal was created before the error
-      if (req.body.id) {
-        res.status(500).json({ 
-          message: "Failed to generate schedule, but goal was created. Please try adding tasks manually.",
-          goal: req.body
-        });
-      } else {
-        res.status(500).json({ 
-          message: "Failed to create goal. Please try again later."
-        });
-      }
-    }
-  });
-
-  app.get("/api/goals", async (req, res) => {
-    if (!req.user) return res.sendStatus(401);
-    try {
-      const goals = await storage.getGoalsByUser(req.user.id);
-      res.json(goals);
-    } catch (error) {
-      console.error("Error fetching goals:", error);
-      res.status(500).json({ message: "Failed to fetch goals" });
-    }
-  });
-
-  app.get("/api/goals/:id/tasks", async (req, res) => {
-    if (!req.user) return res.sendStatus(401);
-    try {
-      const goalId = parseInt(req.params.id);
-      if (isNaN(goalId)) {
-        return res.status(400).json({ message: "Invalid goal ID" });
-      }
-
-      const tasks = await storage.getTasksByGoal(goalId);
-      res.json(tasks);
-    } catch (error) {
-      console.error("Error fetching tasks:", error);
-      res.status(500).json({ message: "Failed to fetch tasks" });
+      // Return the goal even if schedule generation fails
+      res.status(500).json({ 
+        message: "Failed to generate schedule, but goal was created. Please try adding tasks manually.",
+        goal
+      });
     }
   });
 
@@ -140,7 +107,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Message is required" });
       }
 
-      const model = genAI.getGenerativeModel({ model: "gemini-1.0-pro" });
+      const model = genAI.getGenerativeModel({ model: "gemini-pro" });
       const prompt = `As a learning assistant for a goal tracking app, help the user with this question: ${req.body.message}`;
 
       const result = await model.generateContent(prompt);
@@ -167,17 +134,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Concept explanation is required" });
       }
 
-      // First fetch the specific task directly
       const task = await storage.getTask(taskId);
       if (!task) return res.status(404).json({ message: "Task not found" });
 
-      // Then verify the task belongs to the user (optional security step)
-      const goal = await storage.getGoal(task.goalId);
-      if (!goal || goal.userId !== req.user.id) {
-        return res.status(403).json({ message: "You don't have permission to access this task" });
-      }
-
-      const model = genAI.getGenerativeModel({ model: "gemini-1.0-pro" });
+      const model = genAI.getGenerativeModel({ model: "gemini-pro" });
       const prompt = `
         You are evaluating whether a student has understood a learning task.
 
@@ -237,7 +197,108 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Add endpoints for manual task creation
+  app.get("/api/goals", async (req, res) => {
+    if (!req.user) return res.sendStatus(401);
+    try {
+      const goals = await storage.getGoalsByUser(req.user.id);
+      res.json(goals);
+    } catch (error) {
+      console.error("Error fetching goals:", error);
+      res.status(500).json({ message: "Failed to fetch goals" });
+    }
+  });
+
+  app.get("/api/goals/:id/tasks", async (req, res) => {
+    if (!req.user) return res.sendStatus(401);
+    try {
+      const goalId = parseInt(req.params.id);
+      if (isNaN(goalId)) {
+        return res.status(400).json({ message: "Invalid goal ID" });
+      }
+
+      const tasks = await storage.getTasksByGoal(goalId);
+      res.json(tasks);
+    } catch (error) {
+      console.error("Error fetching tasks:", error);
+      res.status(500).json({ message: "Failed to fetch tasks" });
+    }
+  });
+  app.post("/api/tasks/:id/validate", async (req, res) => {
+    if (!req.user) return res.sendStatus(401);
+
+    try {
+      const taskId = parseInt(req.params.id);
+      if (isNaN(taskId)) {
+        return res.status(400).json({ message: "Invalid task ID" });
+      }
+
+      if (!req.body.concept) {
+        return res.status(400).json({ message: "Concept explanation is required" });
+      }
+
+      const task = await storage.getTask(taskId);
+      if (!task) return res.status(404).json({ message: "Task not found" });
+
+      const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+      const prompt = `
+        You are evaluating whether a student has understood a learning task.
+
+        The task was: "${task.task}"
+
+        The student's explanation is: "${req.body.concept}"
+
+        Evaluate the student's explanation and determine if they demonstrate understanding of the key concepts.
+        First analyze what key concepts should be understood from the task.
+        Then check if the student's explanation addresses these concepts.
+
+        Return your evaluation in JSON format with the following structure:
+        {
+          "isValid": true/false,
+          "feedback": "Your detailed feedback here",
+          "conceptsUnderstood": ["list", "of", "concepts", "understood"],
+          "conceptsMissing": ["list", "of", "concepts", "missing"]
+        }
+      `;
+
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+
+      // Try to parse the JSON response
+      let validationResult;
+      try {
+        validationResult = JSON.parse(response.text());
+      } catch (e) {
+        // Fallback if JSON parsing fails
+        const text = response.text();
+        const isValid = text.toLowerCase().includes("correct") || 
+                      text.toLowerCase().includes("demonstrates understanding") ||
+                      text.toLowerCase().includes("understood");
+
+        validationResult = { 
+          isValid, 
+          feedback: text,
+          conceptsUnderstood: [],
+          conceptsMissing: []
+        };
+      }
+
+      if (validationResult.isValid) {
+        await storage.updateTask(taskId, {
+          isCompleted: true,
+          completionNotes: req.body.concept,
+        });
+      }
+
+      res.json(validationResult);
+    } catch (error) {
+      console.error("Validation error:", error);
+      res.status(500).json({ 
+        message: "Failed to validate concept. Please try again later.",
+        isValid: false 
+      });
+    }
+  });
+
   app.post("/api/goals/:id/tasks", async (req, res) => {
     if (!req.user) return res.sendStatus(401);
 
@@ -284,7 +345,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Add a bulk task creation endpoint for manual scheduling
   app.post("/api/goals/:id/bulk-tasks", async (req, res) => {
     if (!req.user) return res.sendStatus(401);
 
