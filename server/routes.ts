@@ -20,11 +20,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Missing required fields: title, startDate, or endDate" });
       }
 
+      console.log("Creating goal with data:", req.body);
+
       // Create goal first
       createdGoal = await storage.createGoal({
         ...req.body,
         userId: req.user.id,
       });
+
+      console.log("Goal created successfully:", createdGoal);
 
       // Generate schedule using Gemini with better error handling
       const model = genAI.getGenerativeModel({ model: "gemini-pro" });
@@ -46,56 +50,71 @@ export async function registerRoutes(app: Express): Promise<Server> {
         2025-02-27: Complete Python syntax basics tutorial
       `;
 
-      const result = await model.generateContent(prompt);
-      const response = await result.response;
-      const text = response.text();
+      console.log("Sending prompt to Gemini API:", prompt);
 
-      // More robust parsing with error handling
-      const schedule = text.split("\n")
-        .filter(line => line.trim() && line.includes(":"))
-        .map(line => {
-          // Find the first colon to split date and task
-          const colonIndex = line.indexOf(":");
-          if (colonIndex === -1) return null;
+      try {
+        const result = await model.generateContent(prompt);
+        const response = await result.response;
+        const text = response.text();
 
-          const date = line.substring(0, colonIndex).trim();
-          const task = line.substring(colonIndex + 1).trim();
+        console.log("Raw Gemini API response:", text);
 
-          // Validate date format (YYYY-MM-DD)
-          const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-          if (!dateRegex.test(date)) return null;
+        // More robust parsing with error handling
+        const schedule = text.split("\n")
+          .filter(line => line.trim() && line.includes(":"))
+          .map(line => {
+            // Find the first colon to split date and task
+            const colonIndex = line.indexOf(":");
+            if (colonIndex === -1) return null;
 
-          return { date, task };
-        })
-        .filter(item => item !== null);
+            const date = line.substring(0, colonIndex).trim();
+            const task = line.substring(colonIndex + 1).trim();
 
-      // Check if we got any valid schedule items
-      if (schedule.length === 0) {
-        throw new Error("Failed to generate a valid schedule from AI response");
-      }
+            // Validate date format (YYYY-MM-DD)
+            const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+            if (!dateRegex.test(date)) return null;
 
-      // Create tasks from schedule
-      for (const item of schedule) {
-        await storage.createTask({
-          goalId: createdGoal.id,
-          date: item.date,
-          task: item.task,
-          isCompleted: false,
-          completionNotes: null,
+            return { date, task };
+          })
+          .filter(item => item !== null);
+
+        console.log("Parsed schedule:", schedule);
+
+        // Check if we got any valid schedule items
+        if (schedule.length === 0) {
+          throw new Error("Failed to generate a valid schedule from AI response");
+        }
+
+        // Create tasks from schedule
+        const tasks = [];
+        for (const item of schedule) {
+          const task = await storage.createTask({
+            goalId: createdGoal.id,
+            date: item.date,
+            task: item.task,
+            isCompleted: false,
+            completionNotes: null,
+          });
+          tasks.push(task);
+        }
+
+        console.log("Created tasks:", tasks);
+
+        // Return goal with tasks
+        res.json({ goal: createdGoal, tasks });
+
+      } catch (genError) {
+        console.error("Gemini API or task creation error:", genError);
+        res.status(500).json({ 
+          message: "Failed to generate schedule, but goal was created. Please try adding tasks manually.",
+          goal: createdGoal
         });
       }
 
-      // Return goal with tasks
-      const tasks = await storage.getTasksByGoal(createdGoal.id);
-      res.json({ goal: createdGoal, tasks });
-
     } catch (error) {
-      console.error("Goal creation or schedule generation error:", error);
-
-      // Return the goal even if schedule generation fails
+      console.error("Goal creation error:", error);
       res.status(500).json({ 
-        message: "Failed to generate schedule, but goal was created. Please try adding tasks manually.",
-        goal: createdGoal
+        message: "Failed to create goal. Please try again later."
       });
     }
   });
