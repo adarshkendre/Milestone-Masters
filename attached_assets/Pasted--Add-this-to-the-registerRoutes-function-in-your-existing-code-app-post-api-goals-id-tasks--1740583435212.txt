@@ -1,0 +1,103 @@
+// Add this to the registerRoutes function in your existing code
+
+app.post("/api/goals/:id/tasks", async (req, res) => {
+  if (!req.user) return res.sendStatus(401);
+  
+  try {
+    const goalId = parseInt(req.params.id);
+    if (isNaN(goalId)) {
+      return res.status(400).json({ message: "Invalid goal ID" });
+    }
+    
+    // Validate request body
+    if (!req.body.date || !req.body.task) {
+      return res.status(400).json({ message: "Date and task are required" });
+    }
+    
+    // Verify the goal belongs to the user
+    const goal = await storage.getGoal(goalId);
+    if (!goal) {
+      return res.status(404).json({ message: "Goal not found" });
+    }
+    
+    if (goal.userId !== req.user.id) {
+      return res.status(403).json({ message: "You don't have permission to add tasks to this goal" });
+    }
+    
+    // Validate date format
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(req.body.date)) {
+      return res.status(400).json({ message: "Date must be in YYYY-MM-DD format" });
+    }
+    
+    // Create the task
+    const task = await storage.createTask({
+      goalId,
+      date: req.body.date,
+      task: req.body.task,
+      isCompleted: false,
+      completionNotes: null,
+    });
+    
+    res.json(task);
+  } catch (error) {
+    console.error("Error creating task:", error);
+    res.status(500).json({ message: "Failed to create task" });
+  }
+});
+
+// Add a bulk task creation endpoint for manual scheduling
+app.post("/api/goals/:id/bulk-tasks", async (req, res) => {
+  if (!req.user) return res.sendStatus(401);
+  
+  try {
+    const goalId = parseInt(req.params.id);
+    if (isNaN(goalId)) {
+      return res.status(400).json({ message: "Invalid goal ID" });
+    }
+    
+    // Validate request body
+    if (!Array.isArray(req.body.tasks) || req.body.tasks.length === 0) {
+      return res.status(400).json({ message: "Tasks array is required" });
+    }
+    
+    // Verify the goal belongs to the user
+    const goal = await storage.getGoal(goalId);
+    if (!goal) {
+      return res.status(404).json({ message: "Goal not found" });
+    }
+    
+    if (goal.userId !== req.user.id) {
+      return res.status(403).json({ message: "You don't have permission to add tasks to this goal" });
+    }
+    
+    // Validate each task
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    const tasks = [];
+    
+    for (const taskData of req.body.tasks) {
+      if (!taskData.date || !taskData.task) {
+        return res.status(400).json({ message: "Each task must have date and task properties" });
+      }
+      
+      if (!dateRegex.test(taskData.date)) {
+        return res.status(400).json({ message: "Date must be in YYYY-MM-DD format" });
+      }
+      
+      const task = await storage.createTask({
+        goalId,
+        date: taskData.date,
+        task: taskData.task,
+        isCompleted: false,
+        completionNotes: null,
+      });
+      
+      tasks.push(task);
+    }
+    
+    res.json(tasks);
+  } catch (error) {
+    console.error("Error creating bulk tasks:", error);
+    res.status(500).json({ message: "Failed to create tasks" });
+  }
+});

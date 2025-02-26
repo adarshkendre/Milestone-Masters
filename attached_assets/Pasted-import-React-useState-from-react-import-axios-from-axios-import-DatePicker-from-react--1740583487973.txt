@@ -1,0 +1,182 @@
+import React, { useState } from 'react';
+import axios from 'axios';
+import DatePicker from 'react-datepicker';
+import 'react-datepicker/dist/react-datepicker.css';
+import GeminiErrorHandler from './GeminiErrorHandler';
+
+const AddGoalForm = ({ onGoalAdded, onCancel }) => {
+  const [formData, setFormData] = useState({
+    title: '',
+    description: '',
+    startDate: new Date(),
+    endDate: new Date(new Date().setDate(new Date().getDate() + 30))
+  });
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [createdGoal, setCreatedGoal] = useState(null);
+
+  const handleChange = (e) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  const handleDateChange = (date, field) => {
+    setFormData({ ...formData, [field]: date });
+  };
+
+  const validateForm = () => {
+    if (!formData.title.trim()) {
+      setError({ message: 'Title is required' });
+      return false;
+    }
+    
+    if (formData.startDate > formData.endDate) {
+      setError({ message: 'End date must be after start date' });
+      return false;
+    }
+    
+    return true;
+  };
+
+  const createGoal = async () => {
+    if (!validateForm()) return;
+    
+    setIsLoading(true);
+    setError(null);
+    
+    try {
+      const token = localStorage.getItem('token');
+      const goalData = {
+        title: formData.title,
+        description: formData.description,
+        startDate: formData.startDate.toISOString().split('T')[0], // Format as YYYY-MM-DD
+        endDate: formData.endDate.toISOString().split('T')[0]
+      };
+      
+      const response = await axios.post('/api/goals', goalData, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      // Check if we received a goal with tasks or just a goal
+      if (response.data.goal && response.data.tasks) {
+        onGoalAdded(response.data.goal);
+      } else if (response.data.message && response.data.message.includes('Failed to generate schedule')) {
+        // Handle error but keep the created goal
+        setCreatedGoal(response.data.goal);
+        setError({ message: response.data.message });
+      } else {
+        // Normal success case
+        onGoalAdded(response.data);
+      }
+    } catch (err) {
+      console.error('Error creating goal:', err);
+      setError(err.response?.data || { message: 'Failed to create goal' });
+      
+      if (err.response?.data?.goal) {
+        setCreatedGoal(err.response.data.goal);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    createGoal();
+  };
+
+  const handleRetry = () => {
+    setError(null);
+    createGoal();
+  };
+
+  const handleScheduleCreated = (tasks) => {
+    onGoalAdded(createdGoal);
+  };
+
+  // If we have an error related to schedule generation, show the error handler
+  if (error && createdGoal) {
+    return (
+      <GeminiErrorHandler
+        error={error}
+        goalId={createdGoal.id}
+        onScheduleCreated={handleScheduleCreated}
+        onRetry={handleRetry}
+      />
+    );
+  }
+
+  return (
+    <div className="add-goal-form">
+      <h2>Add New Goal</h2>
+      
+      {error && <div className="error-message">{error.message}</div>}
+      
+      <form onSubmit={handleSubmit}>
+        <div className="form-group">
+          <label>Title</label>
+          <input
+            type="text"
+            name="title"
+            value={formData.title}
+            onChange={handleChange}
+            placeholder="Enter goal title"
+            required
+          />
+        </div>
+        
+        <div className="form-group">
+          <label>Description</label>
+          <textarea
+            name="description"
+            value={formData.description}
+            onChange={handleChange}
+            placeholder="Describe your goal"
+            rows={4}
+          />
+        </div>
+        
+        <div className="form-row">
+          <div className="form-group">
+            <label>Start Date</label>
+            <DatePicker
+              selected={formData.startDate}
+              onChange={(date) => handleDateChange(date, 'startDate')}
+              minDate={new Date()}
+              dateFormat="yyyy-MM-dd"
+            />
+          </div>
+          
+          <div className="form-group">
+            <label>End Date</label>
+            <DatePicker
+              selected={formData.endDate}
+              onChange={(date) => handleDateChange(date, 'endDate')}
+              minDate={formData.startDate}
+              dateFormat="yyyy-MM-dd"
+            />
+          </div>
+        </div>
+        
+        <div className="form-actions">
+          <button 
+            type="button" 
+            className="cancel-button" 
+            onClick={onCancel}
+            disabled={isLoading}
+          >
+            Cancel
+          </button>
+          <button 
+            type="submit" 
+            className="submit-button" 
+            disabled={isLoading}
+          >
+            {isLoading ? 'Creating...' : 'Create Goal'}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+};
+
+export default AddGoalForm;

@@ -1,0 +1,129 @@
+import React, { useState } from 'react';
+import axios from 'axios';
+import DatePicker from 'react-datepicker';
+import 'react-datepicker/dist/react-datepicker.css';
+
+const ManualScheduleCreator = ({ goalId, onScheduleCreated }) => {
+  const [tasks, setTasks] = useState([{ date: new Date(), task: '' }]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleAddTask = () => {
+    setTasks([...tasks, { date: new Date(), task: '' }]);
+  };
+
+  const handleRemoveTask = (index) => {
+    const newTasks = [...tasks];
+    newTasks.splice(index, 1);
+    setTasks(newTasks);
+  };
+
+  const handleTaskChange = (index, field, value) => {
+    const newTasks = [...tasks];
+    newTasks[index][field] = value;
+    setTasks(newTasks);
+  };
+
+  const validateTasks = () => {
+    for (const task of tasks) {
+      if (!task.date || !task.task.trim()) {
+        setError('All tasks must have both a date and description');
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    
+    if (!validateTasks()) return;
+    
+    setIsLoading(true);
+    setError('');
+    
+    try {
+      const token = localStorage.getItem('token');
+      const formattedTasks = tasks.map(task => ({
+        date: task.date.toISOString().split('T')[0], // Format as YYYY-MM-DD
+        task: task.task
+      }));
+      
+      const response = await axios.post(`/api/goals/${goalId}/bulk-tasks`, {
+        tasks: formattedTasks
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      onScheduleCreated(response.data);
+    } catch (err) {
+      console.error('Error creating tasks:', err);
+      setError(err.response?.data?.message || 'Failed to create schedule');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const formatDate = (date) => {
+    return date.toISOString().split('T')[0]; // YYYY-MM-DD
+  };
+
+  return (
+    <div className="manual-schedule-creator">
+      <h3>Create Schedule Manually</h3>
+      
+      {error && <div className="error-message">{error}</div>}
+      
+      <form onSubmit={handleSubmit}>
+        {tasks.map((task, index) => (
+          <div key={index} className="task-row">
+            <div className="task-date">
+              <DatePicker
+                selected={task.date}
+                onChange={(date) => handleTaskChange(index, 'date', date)}
+                dateFormat="yyyy-MM-dd"
+              />
+            </div>
+            
+            <div className="task-description">
+              <input
+                type="text"
+                value={task.task}
+                onChange={(e) => handleTaskChange(index, 'task', e.target.value)}
+                placeholder="Task description"
+              />
+            </div>
+            
+            <button
+              type="button"
+              className="remove-task"
+              onClick={() => handleRemoveTask(index)}
+            >
+              Remove
+            </button>
+          </div>
+        ))}
+        
+        <div className="form-actions">
+          <button
+            type="button"
+            className="add-task"
+            onClick={handleAddTask}
+          >
+            Add Another Task
+          </button>
+          
+          <button
+            type="submit"
+            className="create-schedule"
+            disabled={isLoading}
+          >
+            {isLoading ? 'Creating...' : 'Create Schedule'}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+};
+
+export default ManualScheduleCreator;
