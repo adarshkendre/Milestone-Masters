@@ -17,30 +17,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
       userId: req.user.id,
     });
 
-    // Generate schedule using Gemini
-    const model = genAI.getGenerativeModel({ model: "gemini-pro" });
-    const prompt = `Create a day-by-day schedule between ${req.body.startDate} and ${req.body.endDate} for this goal: ${req.body.title}. ${req.body.description}`;
+    try {
+      // Generate schedule using Gemini
+      const model = genAI.getGenerativeModel({ model: "gemini-1.0-pro" });
+      const prompt = `Create a day-by-day schedule between ${req.body.startDate} and ${req.body.endDate} for this goal: ${req.body.title}. ${req.body.description}. Format each line as 'YYYY-MM-DD: task description'`;
 
-    const result = await model.generateContent(prompt);
-    const schedule = result.response.text().split("\n")
-      .filter(line => line.trim())
-      .map(line => {
-        const [date, task] = line.split(":");
-        return { date: date.trim(), task: task.trim() };
-      });
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      const schedule = response.text().split("\n")
+        .filter(line => line.trim())
+        .map(line => {
+          const [date, task] = line.split(":");
+          return { date: date.trim(), task: task.trim() };
+        });
 
-    // Create tasks from schedule
-    for (const item of schedule) {
-      await storage.createTask({
-        goalId: goal.id,
-        date: item.date,
-        task: item.task,
-        isCompleted: false,
-        completionNotes: null,
+      // Create tasks from schedule
+      for (const item of schedule) {
+        await storage.createTask({
+          goalId: goal.id,
+          date: item.date,
+          task: item.task,
+          isCompleted: false,
+          completionNotes: null,
+        });
+      }
+
+      res.json(goal);
+    } catch (error) {
+      console.error("Gemini API error:", error);
+      res.status(500).json({ 
+        message: "Failed to generate schedule, but goal was created. Please try adding tasks manually.",
+        goal 
       });
     }
-
-    res.json(goal);
   });
 
   app.get("/api/goals", async (req, res) => {
@@ -62,22 +71,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const task = tasks.find(t => t.id === parseInt(req.params.id));
     if (!task) return res.status(404).send("Task not found");
 
-    const model = genAI.getGenerativeModel({ model: "gemini-pro" });
-    const prompt = `Validate if this response demonstrates understanding of the task: ${req.body.concept}. Task: ${task.task}`;
+    try {
+      const model = genAI.getGenerativeModel({ model: "gemini-1.0-pro" });
+      const prompt = `Validate if this response demonstrates understanding of the task: ${req.body.concept}. Task: ${task.task}`;
 
-    const result = await model.generateContent(prompt);
-    const validation = result.response.text();
-    const isValid = validation.toLowerCase().includes("correct") || 
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      const validation = response.text();
+      const isValid = validation.toLowerCase().includes("correct") || 
                     validation.toLowerCase().includes("demonstrates understanding");
 
-    if (isValid) {
-      await storage.updateTask(parseInt(req.params.id), {
-        isCompleted: true,
-        completionNotes: req.body.concept,
+      if (isValid) {
+        await storage.updateTask(parseInt(req.params.id), {
+          isCompleted: true,
+          completionNotes: req.body.concept,
+        });
+      }
+
+      res.json({ isValid, feedback: validation });
+    } catch (error) {
+      console.error("Gemini API error:", error);
+      res.status(500).json({ 
+        message: "Failed to validate concept. Please try again later.",
+        isValid: false 
       });
     }
-
-    res.json({ isValid, feedback: validation });
   });
 
   const httpServer = createServer(app);
