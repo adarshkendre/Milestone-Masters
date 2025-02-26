@@ -33,7 +33,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       try {
         // Generate schedule using Gemini
-        const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
 
         const prompt = `
           Create a schedule for learning ${req.body.title} between ${req.body.startDate} and ${req.body.endDate}.
@@ -123,7 +123,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log("Chat request:", req.body.message);
 
-      const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
       const prompt = `
         As a learning assistant focused on goal tracking and learning, help the user with this question: 
         ${req.body.message}
@@ -162,7 +162,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const task = await storage.getTask(taskId);
       if (!task) return res.status(404).json({ message: "Task not found" });
 
-      const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
       const prompt = `
         You are evaluating whether a student has understood a learning task.
 
@@ -264,7 +264,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const task = await storage.getTask(taskId);
       if (!task) return res.status(404).json({ message: "Task not found" });
 
-      const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
       const prompt = `
         You are evaluating whether a student has understood a learning task.
 
