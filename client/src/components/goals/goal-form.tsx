@@ -1,5 +1,4 @@
 import { Button } from "@/components/ui/button";
-import { Calendar } from "@/components/ui/calendar";
 import {
   Form,
   FormControl,
@@ -10,6 +9,7 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Calendar } from "@/components/ui/calendar";
 import {
   Popover,
   PopoverContent,
@@ -24,9 +24,14 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { CalendarIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { ScheduleGeneratorBot } from "./ScheduleGeneratorBot";
+import { useState } from "react";
 
 export function GoalForm() {
   const { toast } = useToast();
+  const [showScheduleGenerator, setShowScheduleGenerator] = useState(false);
+  const [formData, setFormData] = useState<InsertGoal | null>(null);
+
   const form = useForm<InsertGoal>({
     resolver: zodResolver(insertGoalSchema),
     defaultValues: {
@@ -46,9 +51,11 @@ export function GoalForm() {
       queryClient.invalidateQueries({ queryKey: ["/api/goals"] });
       toast({
         title: "Goal created",
-        description: "Your goal has been created with an AI-generated schedule.",
+        description: "Your goal has been created with the generated schedule.",
       });
       form.reset();
+      setShowScheduleGenerator(false);
+      setFormData(null);
     },
     onError: (error: Error) => {
       toast({
@@ -59,10 +66,32 @@ export function GoalForm() {
     },
   });
 
+  const handleSubmit = (data: InsertGoal) => {
+    setFormData(data);
+    setShowScheduleGenerator(true);
+  };
+
+  const handleScheduleGenerated = (tasks: any[]) => {
+    if (!formData) return;
+    mutation.mutate(formData);
+  };
+
+  if (showScheduleGenerator && formData) {
+    return (
+      <ScheduleGeneratorBot
+        goalTitle={formData.title}
+        goalDescription={formData.description}
+        startDate={formData.startDate}
+        endDate={formData.endDate}
+        onScheduleGenerated={handleScheduleGenerated}
+      />
+    );
+  }
+
   return (
     <Form {...form}>
       <form
-        onSubmit={form.handleSubmit((data) => mutation.mutate(data))}
+        onSubmit={form.handleSubmit(handleSubmit)}
         className="space-y-6"
       >
         <FormField
@@ -162,8 +191,8 @@ export function GoalForm() {
                     mode="single"
                     selected={field.value ? new Date(field.value) : undefined}
                     onSelect={(date) => field.onChange(date ? format(date, 'yyyy-MM-dd') : '')}
-                    disabled={(date) => 
-                      date < new Date(form.getValues("startDate")) || 
+                    disabled={(date) =>
+                      date < new Date(form.getValues("startDate")) ||
                       date < new Date()
                     }
                   />
@@ -179,7 +208,7 @@ export function GoalForm() {
           className="w-full"
           disabled={mutation.isPending}
         >
-          Create Goal
+          Create Goal & Generate Schedule
         </Button>
       </form>
     </Form>
