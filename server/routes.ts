@@ -103,7 +103,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log("Parsed tasks:", tasks);
 
-      // Create tasks
+      // Create tasks in database
       const createdTasks = [];
       for (const task of tasks) {
         const newTask = await storage.createTask({
@@ -141,114 +141,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Schedule Bot endpoint
-  app.post("/api/generate-schedule", async (req, res) => {
-    if (!req.user) return res.sendStatus(401);
-
-    try {
-      const { title, description, startDate, endDate } = req.body;
-
-      if (!title || !startDate || !endDate) {
-        return res.status(400).json({ message: "Missing required fields: title, startDate, or endDate" });
-      }
-
-      // Check if API key is available
-      if (!process.env.GEMINI_API_KEY) {
-        return res.status(500).json({
-          message: "API key not configured. Please set GEMINI_API_KEY environment variable.",
-          fallbackSchedule: generateFallbackSchedule(startDate, endDate, title)
-        });
-      }
-
-      const model = genAI.getGenerativeModel({ model: "gemini-pro" });
-      const prompt = `
-        Create a daily schedule between ${startDate} and ${endDate} for this learning goal: ${title}
-        ${description ? `Context: ${description}` : ''}
-
-        Guidelines:
-        1. Create specific, actionable daily tasks
-        2. Start with basics and progressively increase complexity
-        3. Include practical exercises and assignments
-        4. Format each task exactly as: YYYY-MM-DD: [task description]
-
-        Example format:
-        2024-02-26: Research basic Python syntax and complete 2 beginner tutorials
-        2024-02-27: Practice writing and debugging simple Python scripts
-      `;
-
-      console.log("Sending schedule generation prompt:", prompt);
-
-      const result = await model.generateContent(prompt);
-      const response = await result.response;
-      const text = response.text();
-
-      console.log("Raw API response:", text);
-
-      const tasks = text.split('\n')
-        .map(line => line.trim())
-        .filter(line => line && line.includes(':'))
-        .map(line => {
-          const [date, ...taskParts] = line.split(':');
-          return {
-            date: date.trim(),
-            task: taskParts.join(':').trim()
-          };
-        })
-        .filter(task => {
-          const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-          return dateRegex.test(task.date);
-        });
-
-      if (tasks.length === 0) {
-        throw new Error('No valid tasks generated from the response');
-      }
-
-      console.log("Parsed tasks:", tasks);
-      res.json({ tasks });
-
-    } catch (error) {
-      console.error("Schedule generation error:", error);
-      // Return fallback schedule when API fails
-      const { title, startDate, endDate } = req.body;
-      res.status(500).json({ 
-        message: "Failed to generate schedule. Using fallback schedule.",
-        fallbackSchedule: generateFallbackSchedule(startDate, endDate, title)
-      });
-    }
-  });
-
-  // Helper function to generate a fallback schedule when the AI fails
-  function generateFallbackSchedule(startDate: string, endDate: string, title: string) {
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    const tasks = [];
-    
-    const daysCount = Math.floor((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-    const currentDate = new Date(start);
-    
-    const defaultTasks = [
-      "Research basics and fundamental concepts",
-      "Complete introductory tutorials",
-      "Practice basic exercises",
-      "Review previous material and start intermediate concepts",
-      "Work on a small project applying what you've learned",
-      "Dive into advanced topics",
-      "Complete a challenge project",
-      "Review all material and identify knowledge gaps"
-    ];
-    
-    for (let i = 0; i < daysCount && i < defaultTasks.length; i++) {
-      const dateString = currentDate.toISOString().split('T')[0];
-      tasks.push({
-        date: dateString,
-        task: defaultTasks[i] + ` related to ${title}`
-      });
-      currentDate.setDate(currentDate.getDate() + 1);
-    }
-    
-    return tasks;
-  }
-
   // Clear Concept Bot endpoint
   app.post("/api/chat", async (req, res) => {
     if (!req.user) return res.sendStatus(401);
@@ -285,7 +177,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     }
   });
-
 
   app.post("/api/tasks/:id/validate", async (req, res) => {
     if (!req.user) return res.sendStatus(401);
@@ -338,12 +229,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           const result = await model.generateContent(prompt);
           const response = await result.response;
+          const text = response.text();
 
-          // Parse response or use fallback
           try {
-            validationResult = JSON.parse(response.text());
+            validationResult = JSON.parse(text);
           } catch (e) {
-            const text = response.text();
             validationResult = { 
               isValid: true, 
               feedback: "We couldn't fully evaluate your response, but it has been accepted. Keep learning!",
@@ -405,7 +295,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: "Failed to fetch tasks" });
     }
   });
-    app.post("/api/goals/:id/tasks", async (req, res) => {
+
+  app.post("/api/goals/:id/tasks", async (req, res) => {
     if (!req.user) return res.sendStatus(401);
 
     try {

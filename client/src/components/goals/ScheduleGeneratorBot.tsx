@@ -31,7 +31,7 @@ export function ScheduleGeneratorBot({
 
   const generateMutation = useMutation({
     mutationFn: async () => {
-      console.log("Generating schedule with data:", {
+      console.log("Creating goal with data:", {
         title: goalTitle,
         description: goalDescription,
         startDate,
@@ -40,7 +40,7 @@ export function ScheduleGeneratorBot({
 
       const response = await apiRequest("POST", "/api/goals", {
         title: goalTitle,
-        description: goalDescription,
+        description: goalDescription || "",
         startDate,
         endDate
       });
@@ -48,7 +48,7 @@ export function ScheduleGeneratorBot({
       return response.json();
     },
     onSuccess: (data) => {
-      console.log("Schedule generation response:", data);
+      console.log("Goal and schedule creation response:", data);
 
       if (!data.tasks || data.tasks.length === 0) {
         throw new Error("No tasks were generated");
