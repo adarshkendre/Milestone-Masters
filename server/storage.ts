@@ -1,8 +1,12 @@
 import type { User, InsertUser, Goal, InsertGoal, Task, InsertTask } from "@shared/schema";
+import { users, goals, tasks } from "@shared/schema";
+import { db } from "./db";
+import { eq } from "drizzle-orm";
 import session from "express-session";
-import createMemoryStore from "memorystore";
+import connectPg from "connect-pg-simple";
+import { pool } from "./db";
 
-const MemoryStore = createMemoryStore(session);
+const PostgresSessionStore = connectPg(session);
 
 export interface IStorage {
   getUser(id: number): Promise<User | undefined>;
@@ -22,105 +26,138 @@ export interface IStorage {
   sessionStore: session.Store;
 }
 
-export class MemStorage implements IStorage {
-  private users: Map<number, User>;
-  private goals: Map<number, Goal>;
-  private tasks: Map<number, Task>;
+export class DatabaseStorage implements IStorage {
   sessionStore: session.Store;
-  private currentUserId: number = 1;
-  private currentGoalId: number = 1;
-  private currentTaskId: number = 1;
 
   constructor() {
-    this.users = new Map();
-    this.goals = new Map();
-    this.tasks = new Map();
-    this.sessionStore = new MemoryStore({
-      checkPeriod: 86400000,
-    });
+    console.log("Initializing PostgreSQL session store...");
+    try {
+      this.sessionStore = new PostgresSessionStore({
+        pool,
+        createTableIfMissing: true,
+      });
+      console.log("PostgreSQL session store initialized successfully");
+    } catch (error) {
+      console.error("Failed to initialize PostgreSQL session store:", error);
+      throw error;
+    }
   }
 
   async getUser(id: number): Promise<User | undefined> {
-    return this.users.get(id);
+    try {
+      const [user] = await db.select().from(users).where(eq(users.id, id));
+      return user;
+    } catch (error) {
+      console.error(`Error fetching user ${id}:`, error);
+      throw error;
+    }
   }
 
   async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
-    );
+    try {
+      const [user] = await db.select().from(users).where(eq(users.username, username));
+      return user;
+    } catch (error) {
+      console.error(`Error fetching user by username ${username}:`, error);
+      throw error;
+    }
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
-    const id = this.currentUserId++;
-    const user: User = {
-      ...insertUser,
-      id,
-      streak: 0,
-      activeDays: 0,
-      missingDays: 0,
-    };
-    this.users.set(id, user);
-    return user;
+    try {
+      const [user] = await db.insert(users).values(insertUser).returning();
+      return user;
+    } catch (error) {
+      console.error("Error creating user:", error);
+      throw error;
+    }
   }
 
   async updateUserStats(userId: number, stats: Partial<User>): Promise<User> {
-    const user = await this.getUser(userId);
-    if (!user) throw new Error("User not found");
-    const updatedUser = { ...user, ...stats };
-    this.users.set(userId, updatedUser);
-    return updatedUser;
+    try {
+      const [user] = await db
+        .update(users)
+        .set({ ...stats, updatedAt: new Date() })
+        .where(eq(users.id, userId))
+        .returning();
+      return user;
+    } catch (error) {
+      console.error(`Error updating user stats for user ${userId}:`, error);
+      throw error;
+    }
   }
 
   async createGoal(goal: InsertGoal & { userId: number }): Promise<Goal> {
-    const id = this.currentGoalId++;
-    const newGoal: Goal = {
-      ...goal,
-      id,
-      createdAt: new Date(),
-    };
-    this.goals.set(id, newGoal);
-    return newGoal;
+    try {
+      const [newGoal] = await db.insert(goals).values(goal).returning();
+      return newGoal;
+    } catch (error) {
+      console.error("Error creating goal:", error);
+      throw error;
+    }
   }
 
   async getGoalsByUser(userId: number): Promise<Goal[]> {
-    return Array.from(this.goals.values()).filter(
-      (goal) => goal.userId === userId,
-    );
+    try {
+      return db.select().from(goals).where(eq(goals.userId, userId));
+    } catch (error) {
+      console.error(`Error fetching goals for user ${userId}:`, error);
+      throw error;
+    }
   }
 
   async getGoal(id: number): Promise<Goal | undefined> {
-    return this.goals.get(id);
+    try {
+      const [goal] = await db.select().from(goals).where(eq(goals.id, id));
+      return goal;
+    } catch (error) {
+      console.error(`Error fetching goal ${id}:`, error);
+      throw error;
+    }
   }
 
   async createTask(task: InsertTask): Promise<Task> {
-    const id = this.currentTaskId++;
-    const newTask: Task = {
-      ...task,
-      id,
-      isCompleted: false,
-      completionNotes: null,
-    };
-    this.tasks.set(id, newTask);
-    return newTask;
+    try {
+      const [newTask] = await db.insert(tasks).values(task).returning();
+      return newTask;
+    } catch (error) {
+      console.error("Error creating task:", error);
+      throw error;
+    }
   }
 
   async getTask(id: number): Promise<Task | undefined> {
-    return this.tasks.get(id);
+    try {
+      const [task] = await db.select().from(tasks).where(eq(tasks.id, id));
+      return task;
+    } catch (error) {
+      console.error(`Error fetching task ${id}:`, error);
+      throw error;
+    }
   }
 
   async getTasksByGoal(goalId: number): Promise<Task[]> {
-    return Array.from(this.tasks.values()).filter(
-      (task) => task.goalId === goalId,
-    );
+    try {
+      return db.select().from(tasks).where(eq(tasks.goalId, goalId));
+    } catch (error) {
+      console.error(`Error fetching tasks for goal ${goalId}:`, error);
+      throw error;
+    }
   }
 
   async updateTask(id: number, updates: Partial<Task>): Promise<Task> {
-    const task = this.tasks.get(id);
-    if (!task) throw new Error("Task not found");
-    const updatedTask = { ...task, ...updates };
-    this.tasks.set(id, updatedTask);
-    return updatedTask;
+    try {
+      const [task] = await db
+        .update(tasks)
+        .set({ ...updates, updatedAt: new Date() })
+        .where(eq(tasks.id, id))
+        .returning();
+      return task;
+    } catch (error) {
+      console.error(`Error updating task ${id}:`, error);
+      throw error;
+    }
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new DatabaseStorage();
