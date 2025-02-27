@@ -5,7 +5,11 @@ import { storage } from "./storage";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 // Initialize Gemini
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+const apiKey = process.env.GEMINI_API_KEY;
+if (!apiKey) {
+  console.warn("GEMINI_API_KEY is not set. AI features will not work correctly.");
+}
+const genAI = new GoogleGenerativeAI(apiKey || "");
 
 // Bot prompts
 const SCHEDULE_BOT_PROMPT = `
@@ -38,6 +42,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (!title || !startDate || !endDate) {
         return res.status(400).json({ message: "Missing required fields: title, startDate, or endDate" });
+      }
+
+      // Check if API key is available
+      if (!process.env.GEMINI_API_KEY) {
+        return res.status(500).json({
+          message: "API key not configured. Please set GEMINI_API_KEY environment variable.",
+          fallbackSchedule: generateFallbackSchedule(startDate, endDate, title)
+        });
       }
 
       const model = genAI.getGenerativeModel({ model: "gemini-pro" });
@@ -88,11 +100,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     } catch (error) {
       console.error("Schedule generation error:", error);
+      // Return fallback schedule when API fails
+      const { title, startDate, endDate } = req.body;
       res.status(500).json({ 
-        message: "Failed to generate schedule. Please try again or create tasks manually."
+        message: "Failed to generate schedule. Using fallback schedule.",
+        fallbackSchedule: generateFallbackSchedule(startDate, endDate, title)
       });
     }
   });
+
+  // Helper function to generate a fallback schedule when the AI fails
+  function generateFallbackSchedule(startDate: string, endDate: string, title: string) {
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    const tasks = [];
+    
+    const daysCount = Math.floor((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    const currentDate = new Date(start);
+    
+    const defaultTasks = [
+      "Research basics and fundamental concepts",
+      "Complete introductory tutorials",
+      "Practice basic exercises",
+      "Review previous material and start intermediate concepts",
+      "Work on a small project applying what you've learned",
+      "Dive into advanced topics",
+      "Complete a challenge project",
+      "Review all material and identify knowledge gaps"
+    ];
+    
+    for (let i = 0; i < daysCount && i < defaultTasks.length; i++) {
+      const dateString = currentDate.toISOString().split('T')[0];
+      tasks.push({
+        date: dateString,
+        task: defaultTasks[i] + ` related to ${title}`
+      });
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+    
+    return tasks;
+  }
 
   // Clear Concept Bot endpoint
   app.post("/api/chat", async (req, res) => {
@@ -101,6 +148,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       if (!req.body.message) {
         return res.status(400).json({ message: "Message is required" });
+      }
+
+      // Check if API key is available
+      if (!process.env.GEMINI_API_KEY) {
+        return res.json({ 
+          response: "I'm sorry, but the AI service is not available right now. The administrator needs to set up the GEMINI_API_KEY environment variable. In the meantime, you can try searching online resources or documentation for help with your question."
+        });
       }
 
       const prompt = `
@@ -118,8 +172,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ response: text });
     } catch (error) {
       console.error("Chat error:", error);
-      res.status(500).json({ 
-        message: "Failed to process your question. Please try again later."
+      res.json({ 
+        response: "I'm sorry, but I'm having trouble connecting to the AI service right now. Please try again later, or consider checking documentation or online tutorials for help with your question."
       });
     }
   });
@@ -143,48 +197,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log("Goal created:", createdGoal);
 
-      // Generate schedule directly here instead of making another request
-      const model = genAI.getGenerativeModel({ model: "gemini-pro" });
-      const prompt = `
-        Create a daily schedule between ${req.body.startDate} and ${req.body.endDate} for this learning goal: ${req.body.title}
-        ${req.body.description ? `Context: ${req.body.description}` : ''}
+      // Check if API key is available, use fallback if not
+      let tasks = [];
+      if (!process.env.GEMINI_API_KEY) {
+        console.log("API key not configured. Using fallback schedule.");
+        tasks = generateFallbackSchedule(req.body.startDate, req.body.endDate, req.body.title);
+      } else {
+        try {
+          // Generate schedule directly here
+          const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+          const prompt = `
+            Create a daily schedule between ${req.body.startDate} and ${req.body.endDate} for this learning goal: ${req.body.title}
+            ${req.body.description ? `Context: ${req.body.description}` : ''}
 
-        Guidelines:
-        1. Create specific, actionable daily tasks
-        2. Start with basics and progressively increase complexity
-        3. Include practical exercises and assignments
-        4. Format each task exactly as: YYYY-MM-DD: [task description]
+            Guidelines:
+            1. Create specific, actionable daily tasks
+            2. Start with basics and progressively increase complexity
+            3. Include practical exercises and assignments
+            4. Format each task exactly as: YYYY-MM-DD: [task description]
 
-        Example format:
-        2024-02-26: Research basic Python syntax and complete 2 beginner tutorials
-        2024-02-27: Practice writing and debugging simple Python scripts
-      `;
+            Example format:
+            2024-02-26: Research basic Python syntax and complete 2 beginner tutorials
+            2024-02-27: Practice writing and debugging simple Python scripts
+          `;
 
-      console.log("Sending schedule generation prompt:", prompt);
+          console.log("Sending schedule generation prompt:", prompt);
 
-      const result = await model.generateContent(prompt);
-      const response = await result.response;
-      const text = response.text();
+          const result = await model.generateContent(prompt);
+          const response = await result.response;
+          const text = response.text();
 
-      console.log("Raw API response:", text);
+          console.log("Raw API response:", text);
 
-      const tasks = text.split('\n')
-        .map(line => line.trim())
-        .filter(line => line && line.includes(':'))
-        .map(line => {
-          const [date, ...taskParts] = line.split(':');
-          return {
-            date: date.trim(),
-            task: taskParts.join(':').trim()
-          };
-        })
-        .filter(task => {
-          const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-          return dateRegex.test(task.date);
-        });
+          tasks = text.split('\n')
+            .map(line => line.trim())
+            .filter(line => line && line.includes(':'))
+            .map(line => {
+              const [date, ...taskParts] = line.split(':');
+              return {
+                date: date.trim(),
+                task: taskParts.join(':').trim()
+              };
+            })
+            .filter(task => {
+              const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+              return dateRegex.test(task.date);
+            });
 
-      if (tasks.length === 0) {
-        throw new Error('No valid tasks generated from the response');
+          if (tasks.length === 0) {
+            throw new Error('No valid tasks generated from the response');
+          }
+        } catch (error) {
+          console.log("AI generation failed, using fallback schedule", error);
+          tasks = generateFallbackSchedule(req.body.startDate, req.body.endDate, req.body.title);
+        }
       }
 
       console.log("Parsed tasks:", tasks);
@@ -239,29 +305,64 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const task = await storage.getTask(taskId);
       if (!task) return res.status(404).json({ message: "Task not found" });
 
-      const model = genAI.getGenerativeModel({ model: "gemini-pro" });
-      const prompt = `
-        You are evaluating whether a student has understood a learning task.
+      // Check if API key is available
+      let validationResult;
+      if (!process.env.GEMINI_API_KEY) {
+        // Simple fallback validation - always accept with a notice
+        validationResult = {
+          isValid: true,
+          feedback: "AI validation is not available due to missing API key. Your response has been auto-accepted.",
+          conceptsUnderstood: ["self-reported knowledge"],
+          conceptsMissing: []
+        };
+      } else {
+        try {
+          const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+          const prompt = `
+            You are evaluating whether a student has understood a learning task.
 
-        The task was: "${task.task}"
+            The task was: "${task.task}"
 
-        The student's explanation is: "${req.body.concept}"
+            The student's explanation is: "${req.body.concept}"
 
-        Evaluate the student's explanation and determine if they demonstrate understanding of the key concepts.
-        First analyze what key concepts should be understood from the task.
-        Then check if the student's explanation addresses these concepts.
+            Evaluate the student's explanation and determine if they demonstrate understanding of the key concepts.
+            First analyze what key concepts should be understood from the task.
+            Then check if the student's explanation addresses these concepts.
 
-        Return your evaluation in JSON format with the following structure:
-        {
-          "isValid": true/false,
-          "feedback": "Your detailed feedback here",
-          "conceptsUnderstood": ["list", "of", "concepts", "understood"],
-          "conceptsMissing": ["list", "of", "concepts", "missing"]
+            Return your evaluation in JSON format with the following structure:
+            {
+              "isValid": true/false,
+              "feedback": "Your detailed feedback here",
+              "conceptsUnderstood": ["list", "of", "concepts", "understood"],
+              "conceptsMissing": ["list", "of", "concepts", "missing"]
+            }
+          `;
+
+          const result = await model.generateContent(prompt);
+          const response = await result.response;
+
+          // Parse response or use fallback
+          try {
+            validationResult = JSON.parse(response.text());
+          } catch (e) {
+            const text = response.text();
+            validationResult = { 
+              isValid: true, 
+              feedback: "We couldn't fully evaluate your response, but it has been accepted. Keep learning!",
+              conceptsUnderstood: [],
+              conceptsMissing: []
+            };
+          }
+        } catch (error) {
+          // Fallback when API fails
+          validationResult = {
+            isValid: true,
+            feedback: "AI validation service is currently unavailable. Your response has been automatically accepted.",
+            conceptsUnderstood: ["self-reported completion"],
+            conceptsMissing: []
+          };
         }
-      `;
-
-      const result = await model.generateContent(prompt);
-      const response = await result.response;
+      }
 
       // Try to parse the JSON response
       let validationResult;
