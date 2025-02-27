@@ -38,7 +38,7 @@ export function ScheduleGeneratorBot({
         endDate
       });
 
-      const response = await apiRequest("POST", "/api/generate-schedule", {
+      const response = await apiRequest("POST", "/api/goals", {
         title: goalTitle,
         description: goalDescription,
         startDate,
@@ -61,7 +61,7 @@ export function ScheduleGeneratorBot({
       console.error("Schedule generation error:", error);
       toast({
         title: "Failed to Generate Schedule",
-        description: "There was an error generating the schedule. Please try again or create tasks manually.",
+        description: "There was an error generating the schedule. Please try again.",
         variant: "destructive",
       });
     },

@@ -141,22 +141,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userId: req.user.id,
       });
 
-      // Generate schedule using the new endpoint
-      const scheduleResponse = await fetch(`${process.env.REPL_SLUG}/api/generate-schedule`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Cookie': req.headers.cookie // Forward auth cookie
-        },
-        body: JSON.stringify({
-          title: req.body.title,
-          description: req.body.description,
-          startDate: req.body.startDate,
-          endDate: req.body.endDate
-        })
-      });
+      console.log("Goal created:", createdGoal);
 
-      const { tasks } = await scheduleResponse.json();
+      // Generate schedule directly here instead of making another request
+      const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+      const prompt = `
+        Create a daily schedule between ${req.body.startDate} and ${req.body.endDate} for this learning goal: ${req.body.title}
+        ${req.body.description ? `Context: ${req.body.description}` : ''}
+
+        Guidelines:
+        1. Create specific, actionable daily tasks
+        2. Start with basics and progressively increase complexity
+        3. Include practical exercises and assignments
+        4. Format each task exactly as: YYYY-MM-DD: [task description]
+
+        Example format:
+        2024-02-26: Research basic Python syntax and complete 2 beginner tutorials
+        2024-02-27: Practice writing and debugging simple Python scripts
+      `;
+
+      console.log("Sending schedule generation prompt:", prompt);
+
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      const text = response.text();
+
+      console.log("Raw API response:", text);
+
+      const tasks = text.split('\n')
+        .map(line => line.trim())
+        .filter(line => line && line.includes(':'))
+        .map(line => {
+          const [date, ...taskParts] = line.split(':');
+          return {
+            date: date.trim(),
+            task: taskParts.join(':').trim()
+          };
+        })
+        .filter(task => {
+          const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+          return dateRegex.test(task.date);
+        });
+
+      if (tasks.length === 0) {
+        throw new Error('No valid tasks generated from the response');
+      }
+
+      console.log("Parsed tasks:", tasks);
 
       // Create tasks from schedule
       const createdTasks = [];
@@ -171,9 +202,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         createdTasks.push(newTask);
       }
 
+      console.log("Created tasks:", createdTasks);
+
       res.json({ goal: createdGoal, tasks: createdTasks });
+
     } catch (error) {
-      console.error("Goal creation error:", error);
+      console.error("Goal creation or schedule generation error:", error);
+
       if (createdGoal) {
         res.status(500).json({
           message: "Failed to generate schedule, but goal was created. Please try adding tasks manually.",
