@@ -31,6 +31,13 @@ export function ScheduleGeneratorBot({
 
   const generateMutation = useMutation({
     mutationFn: async () => {
+      console.log("Generating schedule with data:", {
+        title: goalTitle,
+        description: goalDescription,
+        startDate,
+        endDate
+      });
+
       const response = await apiRequest("POST", "/api/generate-schedule", {
         title: goalTitle,
         description: goalDescription,
@@ -40,6 +47,10 @@ export function ScheduleGeneratorBot({
       return response.json();
     },
     onSuccess: (data) => {
+      if (!data.tasks || data.tasks.length === 0) {
+        throw new Error("No tasks were generated");
+      }
+      console.log("Generated tasks:", data.tasks);
       setGeneratedSchedule(data.tasks);
       toast({
         title: "Schedule Generated",
@@ -47,15 +58,24 @@ export function ScheduleGeneratorBot({
       });
     },
     onError: (error: Error) => {
+      console.error("Schedule generation error:", error);
       toast({
         title: "Failed to Generate Schedule",
-        description: error.message,
+        description: "There was an error generating the schedule. Please try again or create tasks manually.",
         variant: "destructive",
       });
     },
   });
 
   const handleAcceptSchedule = () => {
+    if (generatedSchedule.length === 0) {
+      toast({
+        title: "No Schedule",
+        description: "Please generate a schedule first.",
+        variant: "destructive",
+      });
+      return;
+    }
     onScheduleGenerated(generatedSchedule);
   };
 

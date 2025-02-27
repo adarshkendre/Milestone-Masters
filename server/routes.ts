@@ -7,9 +7,6 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 // Initialize Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
-// Create model instance (This is not used anymore, as we're using a separate endpoint)
-// const model = genAI.getGenerativeModel({ model: "gemini-pro" });
-
 // Bot prompts
 const SCHEDULE_BOT_PROMPT = `
 You are an AI schedule generator for a learning goal tracking app.
@@ -43,29 +40,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Missing required fields: title, startDate, or endDate" });
       }
 
+      const model = genAI.getGenerativeModel({ model: "gemini-pro" });
       const prompt = `
-        ${SCHEDULE_BOT_PROMPT}
+        Create a daily schedule between ${startDate} and ${endDate} for this learning goal: ${title}
+        ${description ? `Context: ${description}` : ''}
 
-        Goal: ${title}
-        ${description ? `Description: ${description}` : ''}
-        Start Date: ${startDate}
-        End Date: ${endDate}
+        Guidelines:
+        1. Create specific, actionable daily tasks
+        2. Start with basics and progressively increase complexity
+        3. Include practical exercises and assignments
+        4. Format each task exactly as: YYYY-MM-DD: [task description]
 
-        Generate a daily schedule that:
-        1. Starts from basic concepts
-        2. Progressively increases in complexity
-        3. Includes practical exercises
-        4. Has clear, actionable tasks
+        Example format:
+        2024-02-26: Research basic Python syntax and complete 2 beginner tutorials
+        2024-02-27: Practice writing and debugging simple Python scripts
       `;
 
-      const model = genAI.getGenerativeModel({ model: "gemini-pro" }); // Moved model instantiation here
+      console.log("Sending schedule generation prompt:", prompt);
+
       const result = await model.generateContent(prompt);
       const response = await result.response;
       const text = response.text();
 
-      // Parse the schedule
-      const tasks = text
-        .split('\n')
+      console.log("Raw API response:", text);
+
+      const tasks = text.split('\n')
         .map(line => line.trim())
         .filter(line => line && line.includes(':'))
         .map(line => {
@@ -81,14 +80,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
 
       if (tasks.length === 0) {
-        throw new Error('No valid tasks generated');
+        throw new Error('No valid tasks generated from the response');
       }
 
+      console.log("Parsed tasks:", tasks);
       res.json({ tasks });
+
     } catch (error) {
       console.error("Schedule generation error:", error);
       res.status(500).json({ 
-        message: "Failed to generate schedule. Please try again."
+        message: "Failed to generate schedule. Please try again or create tasks manually."
       });
     }
   });
@@ -109,7 +110,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         Provide a clear, helpful response that focuses on understanding and learning.
       `;
-      const model = genAI.getGenerativeModel({ model: "gemini-pro" }); // Moved model instantiation here
+      const model = genAI.getGenerativeModel({ model: "gemini-pro" });
       const result = await model.generateContent(prompt);
       const response = await result.response;
       const text = response.text();
