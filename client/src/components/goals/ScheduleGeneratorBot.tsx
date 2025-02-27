@@ -42,15 +42,18 @@ export function ScheduleGeneratorBot({
         title: goalTitle,
         description: goalDescription,
         startDate,
-        endDate,
+        endDate
       });
+
       return response.json();
     },
     onSuccess: (data) => {
+      console.log("Schedule generation response:", data);
+
       if (!data.tasks || data.tasks.length === 0) {
         throw new Error("No tasks were generated");
       }
-      console.log("Generated tasks:", data.tasks);
+
       setGeneratedSchedule(data.tasks);
       toast({
         title: "Schedule Generated",
@@ -60,8 +63,8 @@ export function ScheduleGeneratorBot({
     onError: (error: Error) => {
       console.error("Schedule generation error:", error);
       toast({
-        title: "Failed to Generate Schedule",
-        description: "There was an error generating the schedule. Please try again.",
+        title: "Schedule Generation Failed",
+        description: "Unable to generate schedule. Please try again.",
         variant: "destructive",
       });
     },
@@ -80,7 +83,7 @@ export function ScheduleGeneratorBot({
   };
 
   return (
-    <Card className="w-full">
+    <Card className="w-full max-w-3xl mx-auto">
       <CardHeader>
         <CardTitle>Schedule Generator Bot</CardTitle>
       </CardHeader>

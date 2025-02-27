@@ -33,6 +33,114 @@ Do NOT generate schedules - that's handled by a different system.
 export async function registerRoutes(app: Express): Promise<Server> {
   setupAuth(app);
 
+  app.post("/api/goals", async (req, res) => {
+    if (!req.user) return res.sendStatus(401);
+
+    let createdGoal;
+
+    try {
+      // Validate input
+      if (!req.body.title || !req.body.startDate || !req.body.endDate) {
+        return res.status(400).json({ message: "Missing required fields: title, startDate, or endDate" });
+      }
+
+      // Create goal
+      createdGoal = await storage.createGoal({
+        ...req.body,
+        userId: req.user.id,
+      });
+
+      console.log("Goal created:", createdGoal);
+
+      // Generate schedule with Gemini
+      const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+      const prompt = `
+        Create a learning schedule between ${req.body.startDate} and ${req.body.endDate} for: ${req.body.title}
+        ${req.body.description ? `Additional context: ${req.body.description}` : ''}
+
+        Break down the learning into daily tasks that:
+        1. Start with fundamentals
+        2. Gradually increase in complexity
+        3. Include practical exercises
+        4. Are specific and actionable
+
+        Format each task exactly as:
+        YYYY-MM-DD: Task description
+
+        Example:
+        2025-02-27: Complete Python basics tutorial and write first script
+        2025-02-28: Practice Python functions and basic data structures
+      `;
+
+      console.log("Sending Gemini prompt:", prompt);
+
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      const text = response.text();
+
+      console.log("Gemini response:", text);
+
+      // Parse tasks
+      const tasks = text
+        .split('\n')
+        .map(line => line.trim())
+        .filter(line => line && line.includes(':'))
+        .map(line => {
+          const [date, ...taskParts] = line.split(':');
+          return {
+            date: date.trim(),
+            task: taskParts.join(':').trim()
+          };
+        })
+        .filter(task => {
+          const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+          return dateRegex.test(task.date);
+        });
+
+      if (tasks.length === 0) {
+        throw new Error('Failed to generate valid tasks');
+      }
+
+      console.log("Parsed tasks:", tasks);
+
+      // Create tasks
+      const createdTasks = [];
+      for (const task of tasks) {
+        const newTask = await storage.createTask({
+          goalId: createdGoal.id,
+          date: task.date,
+          task: task.task,
+          isCompleted: false,
+          completionNotes: null,
+        });
+        createdTasks.push(newTask);
+      }
+
+      console.log("Created tasks:", createdTasks);
+
+      // Send response
+      res.json({
+        goal: createdGoal,
+        tasks: createdTasks
+      });
+
+    } catch (error) {
+      console.error("Error in goal creation:", error);
+      if (createdGoal) {
+        // Goal was created but schedule generation failed
+        res.status(500).json({
+          message: "Goal created but schedule generation failed. Please try again or add tasks manually.",
+          goal: createdGoal
+        });
+      } else {
+        // Goal creation failed
+        res.status(500).json({
+          message: "Failed to create goal. Please try again."
+        });
+      }
+    }
+  });
+
   // Schedule Bot endpoint
   app.post("/api/generate-schedule", async (req, res) => {
     if (!req.user) return res.sendStatus(401);
@@ -178,117 +286,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Goal creation endpoint
-  app.post("/api/goals", async (req, res) => {
-    if (!req.user) return res.sendStatus(401);
 
-    let createdGoal;
-
-    try {
-      if (!req.body.title || !req.body.startDate || !req.body.endDate) {
-        return res.status(400).json({ message: "Missing required fields" });
-      }
-
-      // Create the goal first
-      createdGoal = await storage.createGoal({
-        ...req.body,
-        userId: req.user.id,
-      });
-
-      console.log("Goal created:", createdGoal);
-
-      // Check if API key is available, use fallback if not
-      let tasks = [];
-      if (!process.env.GEMINI_API_KEY) {
-        console.log("API key not configured. Using fallback schedule.");
-        tasks = generateFallbackSchedule(req.body.startDate, req.body.endDate, req.body.title);
-      } else {
-        try {
-          // Generate schedule directly here
-          const model = genAI.getGenerativeModel({ model: "gemini-pro" });
-          const prompt = `
-            Create a daily schedule between ${req.body.startDate} and ${req.body.endDate} for this learning goal: ${req.body.title}
-            ${req.body.description ? `Context: ${req.body.description}` : ''}
-
-            Guidelines:
-            1. Create specific, actionable daily tasks
-            2. Start with basics and progressively increase complexity
-            3. Include practical exercises and assignments
-            4. Format each task exactly as: YYYY-MM-DD: [task description]
-
-            Example format:
-            2024-02-26: Research basic Python syntax and complete 2 beginner tutorials
-            2024-02-27: Practice writing and debugging simple Python scripts
-          `;
-
-          console.log("Sending schedule generation prompt:", prompt);
-
-          const result = await model.generateContent(prompt);
-          const response = await result.response;
-          const text = response.text();
-
-          console.log("Raw API response:", text);
-
-          tasks = text.split('\n')
-            .map(line => line.trim())
-            .filter(line => line && line.includes(':'))
-            .map(line => {
-              const [date, ...taskParts] = line.split(':');
-              return {
-                date: date.trim(),
-                task: taskParts.join(':').trim()
-              };
-            })
-            .filter(task => {
-              const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-              return dateRegex.test(task.date);
-            });
-
-          if (tasks.length === 0) {
-            throw new Error('No valid tasks generated from the response');
-          }
-        } catch (error) {
-          console.log("AI generation failed, using fallback schedule", error);
-          tasks = generateFallbackSchedule(req.body.startDate, req.body.endDate, req.body.title);
-        }
-      }
-
-      console.log("Parsed tasks:", tasks);
-
-      // Create tasks from schedule
-      const createdTasks = [];
-      for (const task of tasks) {
-        const newTask = await storage.createTask({
-          goalId: createdGoal.id,
-          date: task.date,
-          task: task.task,
-          isCompleted: false,
-          completionNotes: null,
-        });
-        createdTasks.push(newTask);
-      }
-
-      console.log("Created tasks:", createdTasks);
-
-      res.json({ goal: createdGoal, tasks: createdTasks });
-
-    } catch (error) {
-      console.error("Goal creation or schedule generation error:", error);
-
-      if (createdGoal) {
-        res.status(500).json({
-          message: "Failed to generate schedule, but goal was created. Please try adding tasks manually.",
-          goal: createdGoal
-        });
-      } else {
-        res.status(500).json({
-          message: "Failed to create goal. Please try again later."
-        });
-      }
-    }
-  });
-
-  // Keep other existing routes...
   app.post("/api/tasks/:id/validate", async (req, res) => {
     if (!req.user) return res.sendStatus(401);
 
@@ -362,25 +360,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
             conceptsMissing: []
           };
         }
-      }
-
-      // Try to parse the JSON response
-      let validationResult;
-      try {
-        validationResult = JSON.parse(response.text());
-      } catch (e) {
-        // Fallback if JSON parsing fails
-        const text = response.text();
-        const isValid = text.toLowerCase().includes("correct") || 
-                      text.toLowerCase().includes("demonstrates understanding") ||
-                      text.toLowerCase().includes("understood");
-
-        validationResult = { 
-          isValid, 
-          feedback: text,
-          conceptsUnderstood: [],
-          conceptsMissing: []
-        };
       }
 
       if (validationResult.isValid) {
